@@ -19,6 +19,7 @@ class G:
     TxMap = {}                              # Map each tranasction to an integer    
     NumIOs = 0                              # Total #IOs used during materialization
     DependencyGraph = nx.DiGraph()          # The actual dependency graph
+    NumMaterialized = 0                     # The #TXs materialized
 
 
 # This class is used to generate transactions in the
@@ -129,7 +130,7 @@ class Materialize(SimPy.Simulation.Process):
             for record in G.TxMap[t]:
                 if G.LastWrite[record] == t:
                     G.LastWrite.pop(record)
-
+            G.NumMaterialized += 1
             return True
 
     FIFORoot = staticmethod(FIFORoot)
@@ -160,7 +161,7 @@ def main():
     MaxSimTime = 1000.0
     SimPy.Simulation.simulate(until = MaxSimTime)
 
-    print G.NumIOs            
+    print G.NumIOs/G.NumMaterialized            
                 
         
 if __name__ == '__main__':
