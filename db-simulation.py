@@ -1,6 +1,7 @@
 import SimPy.Simulation
 import random
 import networkx as nx
+import types
 
 # TODO: 1. Vary the kinds of transactions
 #       
@@ -13,15 +14,11 @@ class G:
     
     # Dependency graph specific stuff
 
-    Roots = []               # The first frontier of txs to materialize
-    Writers = {}             # The last writer of a tuple
-
-    ReadIOs = []
-
-    PendingTransactions = []
-    DoneTransactions = []
-
-    DependencyGraph = nx.DiGraph()
+    Roots = []                              # The first frontier of txs to materialize
+    LastWrite = {}                          # The last writer of a tuple
+    TxMap = {}                              # Map each tranasction to an integer    
+    NumIOs = 0                              # Total #IOs used during materialization
+    DependencyGraph = nx.DiGraph()          # The actual dependency graph
 
 
 # This class is used to generate transactions in the
@@ -40,16 +37,18 @@ class GenTx(SimPy.Simulation.Process):
     TP = 0
     HP = 0
     CP = 0
-
+    
     def __init__(self, db):
         SimPy.Simulation.Process.__init__(self)
-        self.database = db
+        self.DB = db
 
     def GenTransaction():
         # First set the globally unique TxNo. This reads from
         # an increasing counter (TP).
-        ret = { 'TxNo': GenTx.TP }
-        GenTx.TP++        
+        ret = {  }
+        ret['TxNo'] = GenTx.TP
+
+        GenTx.TP += 1        
         retTx = []
         
         # Generate the read set. This is done in the same 
@@ -73,12 +72,14 @@ class GenTx(SimPy.Simulation.Process):
 
         ret['Tx'] = retTx
         G.TxMap[ret['TxNo']] = retTx
+        return ret
 
     GenTransaction = staticmethod(GenTransaction)
     
     def InsertTx(t):
         isRoot = True 
-        G.DependencyGraph.add_node(t['TxNo'])
+        index = t['TxNo']
+        G.DependencyGraph.add_node(index)
         
         for record in t['Tx']:
             
@@ -88,14 +89,15 @@ class GenTx(SimPy.Simulation.Process):
             # and the last writer.
             if record in G.LastWrite:
                 isRoot = False
-                G.DependencyGraph.add_edge(t['TxNo'], G.LastWrite[record])
+                G.DependencyGraph.add_edge(G.LastWrite[record], index)
             
             # This transaction is now the last writer to this
             # record.
-            G.LastWrite[record] = t['TxNo']
+            G.LastWrite[record] = index
             
         if isRoot:
-            G.Roots.append(t)
+            assert isinstance(t['TxNo'], int)
+            G.Roots.append(t['TxNo'])
     
     InsertTx = staticmethod(InsertTx)
     
@@ -103,117 +105,54 @@ class GenTx(SimPy.Simulation.Process):
         while 1:
             curTx = GenTx.GenTransaction()
             GenTx.InsertTx(curTx)
-            yield SimPy.Simulation.hold, self, G.Rnd.expovariate(IncomingGraphTransactions.TxRate)
+            SimPy.Simulation.reactivate(self.DB)
+            yield SimPy.Simulation.hold, self, G.Rnd.expovariate(GenTx.TxRate)
                 
+class Materialize(SimPy.Simulation.Process):
 
-
-
-# This class is used to simulate transactions
-# coming into the system.
-class IncomingTransactions(SimPy.Simulation.Process):
-    TxRate = 1/0.1 # 1.0 is the mean time between transactions
-    
-    def __init__(self, db):
+    def __init(self):
         SimPy.Simulation.Process.__init__(self)
-        self.database = db
-    
+
+    # This method processes all roots in FIFO order.    
+    def FIFORoot():
+        if not G.Roots:
+            return False
+        else:
+            t = G.Roots[0]
+            del G.Roots[0]
+            G.NumIOs += 2*(GenTx.NumRecords)
+            G.Roots = G.Roots+G.DependencyGraph.successors(t)
+            G.DependencyGraph.remove_node(t)
+            
+            # Update all last write information: In case this was
+            # the last write of a record, update the info.
+            for record in G.TxMap[t]:
+                if G.LastWrite[record] == t:
+                    G.LastWrite.pop(record)
+
+            return True
+
+    FIFORoot = staticmethod(FIFORoot)
+
     def Run(self):
         while 1:
-            tx = SimPy.Simulation.now()
-            G.PendingTransactions.append(tx)
-            nextTxTime = G.Rnd.expovariate(IncomingTransactions.TxRate)
-            if len(G.PendingTransactions) == 1:
-                SimPy.Simulation.reactivate(self.database)
-            yield SimPy.Simulation.hold, self, nextTxTime
-
-
-# This class is used to simulate processing transactions
-# within the system.
-#
-# We probably have to make the model more complicated than
-# what we have at the moment. For example, we're basically saying
-# that transactions are executing one by one here, there is no 
-# concurrency. How will you simulate this?
-
-class TraditionalDB(SimPy.Simulation.Process):
-    NumTrans = 0
-    NumWaiting = 0
-    TimeWaiting = 0.0
-    ProcessingRate = 1/1.0 # 1.0 is the mean time to process a transaction
-    
-    def __init__(self):
-        SimPy.Simulation.Process.__init__(self)
-        
-    def Run(self):
-        while 1:
-            if not G.PendingTransactions:
+            if not Materialize.FIFORoot():
                 yield SimPy.Simulation.passivate, self
-            
-            doneTime = G.Rnd.expovariate(TraditionalDB.ProcessingRate)
-            yield SimPy.Simulation.hold, self, doneTime
-            G.DoneTransactions.append({'start' : G.PendingTransactions[0], 'end' : G.PendingTransactions[0]+doneTime})
-            del(G.PendingTransactions[0])
-
-# Assume that each transaction performs
-# 2 I/Os, one for read, one for write.
-# 
-# The structure of the graph will vary with
-# how you select the reads and writes. 
-
-class DumbLazyDB(SimPy.Simulation.Process):
-    DependencyGraph = nx.DiGraph()
-    ProcessingRate = 1/0.1
-    TxTable = {}
-    TxId = 0
-    NumIO = 0
-    NumTx = 0
-    Threshold = 20
-    
-    def __init__(self):
-        SimPy.Simulation.Process.__init__(self)
-
-    def Run(self):
-        while 1:
-            if len(DumbLazyDB.DependencyGraph.nodes()) < DumbLazyDB.Threshold:
-                yield SimPy.Simulation.passivate, self
-            
-            x = checkPopularRoot()
-            # We just found a popular root, materialize it.
-            if x:
-                materializeSingle(DumbLazyDB.DependencyGraph, x)
-            else:
-                materializeSingle(DumbLazyDB.DependencyGraph, G.Roots[0])
-                
-            DumbLazyDB.NumIO += 2
-            DumbLazyDB.NumTx += 1
-            yield SimPy.Simulation.hold, self, G.Rnd.expovariate(DumbLazyDB.ProcessingRate)
-                
-def materializeSingle(graph, root):
-    #assert not graph.predecessors(root)
-    # First add to the list of roots.
-
-    G.Roots.extend(graph.successors(root))
-    # Update graph statistics
-    wRecord = DumbLazyDB.TxTable[root]['write']
-    rRecord = DumbLazyDB.TxTable[root]['read']
-    
-    G.Writers[wRecord].remove(root)
-    
-    #graph.remove_node(root)
-    G.Roots.remove(root)
-
-            
-def checkPopularRoot():
-    for record in G.Roots:
-        if DumbLazyDB.TxTable[record]['write'] < 10:
-            return record
-    return None
             
 
 def main():
-    SimPy.Simulation.initialize()
-    db = DumbLazyDB()
-    tx = IncomingGraphTransactions(db)
+    # Initialize the static members of the transaction generation class.
+    GenTx.NumHot = 1000
+    GenTx.NumCold = 1000000
+    GenTx.NumRecords = 10
+
+    # Initialize the static members of the materialization class.
+    # Materialize.Process = Materialize.FIFORoot
+    
+    SimPy.Simulation.initialize()    
+    
+    db = Materialize()
+    tx = GenTx(db)
     
     SimPy.Simulation.activate(db, db.Run())
     SimPy.Simulation.activate(tx, tx.Run())
@@ -221,9 +160,7 @@ def main():
     MaxSimTime = 1000.0
     SimPy.Simulation.simulate(until = MaxSimTime)
 
-    print DumbLazyDB.NumIO
-    
-            
+    print G.NumIOs            
                 
         
 if __name__ == '__main__':
