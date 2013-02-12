@@ -30,21 +30,28 @@ class G:
     
 
 class GenRead(SimPy.Simulation.Process):
-    ReadRate = 1/0.1
+    ReadRate = 1/0.01
     
     def __init__(self):
         SimPy.Simulation.Process.__init__(self)
+
         
+    
     def BackwardsBFS(q, done):
         if not q:
             return done
 
         elif q[0] in done:
+            done.append(q[0])
             del q[0]
             return GenRead.BackwardsBFS(q, done)
         
         else:
-            q = q + G.DependencyGraph.predecessors(q[0])
+            if G.DependencyGraph.predecessors(q[0]):
+                q = q + G.DependencyGraph.predecessors(q[0])
+            else:
+                assert(q[0] in G.Roots)
+
             done.append(q[0])
             del q[0]
             return GenRead.BackwardsBFS(q, done)
@@ -53,42 +60,60 @@ class GenRead(SimPy.Simulation.Process):
 
     def Read(n):        
         tot = 0
-
+        numMat = 0
         if n in G.LastWrite:
-            txList = GenRead.BackwardsBFS([G.LastWrite[n]], [])
-            txList.reverse()
-            print txList
+            txList = []
+            GenRead.BackwardsBFS([G.LastWrite[n]], txList)
+            txList.sort()
+            #print txList
             done = []
             inMem = []
             while txList:
                 if txList[0] in done:
                     continue
 
-                done.append(txList[0])
+                
                 records = G.TxMap[txList[0]]
                 diff = set(records) - set(inMem)
                 tot += 2*len(diff)                
                 inMem += records
                 tx = txList[0]
-                del txList[0]
+
                 
+                if not(tx in G.Roots):
+                    print done
+                    for t in done:
+                        print G.DependencyGraph.predecessors(t)
+                        print G.DependencyGraph.successors(t)
+                        print 'blah'
+                        
+                    print G.DependencyGraph.predecessors(tx)
+                    print G.DependencyGraph.successors(tx)
+                    print txList
+                    print tx
+
                 assert tx in G.Roots
+                done.append(txList[0])
+                del txList[0]
 
                 G.Roots.remove(tx)                    
                 assert not (tx in G.Roots)                
-                G.Roots.update(G.DependencyGraph.successors(tx))
+                G.Roots.update(set(G.DependencyGraph.successors(tx)))
 
                 G.DependencyGraph.remove_node(tx)                
-
+                
                 # Update all last write information: In case this was
                 # the last write of a record, update the info.
                 for record in records:
                     if G.LastWrite[record] == tx:
-                        G.LastWrite.pop(record)
+                        del G.LastWrite[record]
+                    
+            numMat = len(done)
                 
         else:
             tot += 1
 
+        G.NumMaterialized += numMat
         G.ReadIOs += tot
         G.NumReads += 1
 
@@ -155,7 +180,9 @@ class GenTx(SimPy.Simulation.Process):
             # last hot record. 
             else:
                 retTx.append(GenTx.CP)
-                GenTx.CP = ((GenTx.CP+1) % G.NumCold) + G.NumHot
+                GenTx.CP = ((GenTx.CP+1) % G.NumCold)
+                if GenTx.CP < G.NumHot:
+                    GenTx.CP += G.NumHot
 
         ret['Tx'] = retTx
         G.TxMap[ret['TxNo']] = retTx
@@ -174,8 +201,14 @@ class GenTx(SimPy.Simulation.Process):
             #
             # If yes, we have to add a dependency between this tx
             # and the last writer.
+
             if record in G.LastWrite:
                 isRoot = False
+                
+                if G.LastWrite[record] == index:
+                    print index
+
+                assert (G.LastWrite[record] != index)
                 G.DependencyGraph.add_edge(G.LastWrite[record], index)
             
             # This transaction is now the last writer to this
@@ -184,6 +217,7 @@ class GenTx(SimPy.Simulation.Process):
             
         if isRoot:
             assert isinstance(t['TxNo'], int)
+            assert not(t['TxNo'] in G.Roots)
             G.Roots.add(t['TxNo'])
     
     InsertTx = staticmethod(InsertTx)
@@ -202,6 +236,8 @@ def main():
     G.NumCold = 1000000
     G.NumRecords = 10
 
+    GenTx.CP = G.NumHot
+
     # Initialize the static members of the materialization class.
     # Materialize.Process = Materialize.FIFORoot
     
@@ -218,6 +254,7 @@ def main():
     SimPy.Simulation.simulate(until = MaxSimTime)
 
     print G.ReadIOs / G.NumReads
+    print G.ReadIOs / G.NumMaterialized
 
                 
         
