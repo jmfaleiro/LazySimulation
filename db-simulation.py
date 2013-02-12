@@ -30,31 +30,27 @@ class G:
     
 
 class GenRead(SimPy.Simulation.Process):
-    ReadRate = 1/0.01
+    ReadRate = 1/1
     
     def __init__(self):
         SimPy.Simulation.Process.__init__(self)
 
         
     
-    def BackwardsBFS(q, done):
-        if not q:
-            return done
-
-        elif q[0] in done:
-            done.append(q[0])
-            del q[0]
-            return GenRead.BackwardsBFS(q, done)
+    def BackwardsBFS(first):
+        queue = [first]
+        done = []
         
-        else:
-            if G.DependencyGraph.predecessors(q[0]):
-                q = q + G.DependencyGraph.predecessors(q[0])
+        while queue:
+            if queue[0] in done:
+                done.append(queue[0])
+                del queue[0]
             else:
-                assert(q[0] in G.Roots)
-
-            done.append(q[0])
-            del q[0]
-            return GenRead.BackwardsBFS(q, done)
+                queue = queue + G.DependencyGraph.predecessors(queue[0])
+                done.append(queue[0])
+                del queue[0]
+        return done
+            
         
     BackwardsBFS = staticmethod(BackwardsBFS)
 
@@ -62,17 +58,18 @@ class GenRead(SimPy.Simulation.Process):
         tot = 0
         numMat = 0
         if n in G.LastWrite:
-            txList = []
-            GenRead.BackwardsBFS([G.LastWrite[n]], txList)
+
+            txList = GenRead.BackwardsBFS(G.LastWrite[n])
             txList.sort()
             #print txList
-            done = []
+            done = {}
             inMem = []
             while txList:
                 if txList[0] in done:
+                    del txList[0]
                     continue
-
                 
+                print 1
                 records = G.TxMap[txList[0]]
                 diff = set(records) - set(inMem)
                 tot += 2*len(diff)                
@@ -93,7 +90,7 @@ class GenRead(SimPy.Simulation.Process):
                     print tx
 
                 assert tx in G.Roots
-                done.append(txList[0])
+                done[tx] = -1
                 del txList[0]
 
                 G.Roots.remove(tx)                    
@@ -116,7 +113,11 @@ class GenRead(SimPy.Simulation.Process):
         G.NumMaterialized += numMat
         G.ReadIOs += tot
         G.NumReads += 1
-
+        
+        print G.ReadIOs
+        print G.NumReads
+        print G.NumMaterialized
+        
     Read = staticmethod (Read)
     
     def GenerateRead():
@@ -252,7 +253,7 @@ def main():
     SimPy.Simulation.activate(rtx, rtx.Run())
     MaxSimTime = 1000.0
     SimPy.Simulation.simulate(until = MaxSimTime)
-
+    print 'done!!!'
     print G.ReadIOs / G.NumReads
     print G.ReadIOs / G.NumMaterialized
 
