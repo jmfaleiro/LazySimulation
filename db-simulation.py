@@ -30,7 +30,7 @@ class G:
     
 
 class GenRead(SimPy.Simulation.Process):
-    ReadRate = 1/1
+    ReadRate = 1/0.01
     
     def __init__(self):
         SimPy.Simulation.Process.__init__(self)
@@ -69,10 +69,8 @@ class GenRead(SimPy.Simulation.Process):
                     del txList[0]
                     continue
                 
-                print 1
+                #print 1
                 records = G.TxMap[txList[0]]
-                diff = set(records) - set(inMem)
-                tot += 2*len(diff)                
                 inMem += records
                 tx = txList[0]
 
@@ -105,24 +103,25 @@ class GenRead(SimPy.Simulation.Process):
                     if G.LastWrite[record] == tx:
                         del G.LastWrite[record]
                     
-            numMat = len(done)
+            numMat = len(set(done.keys()))
+            tot = 2*len(set(inMem))
                 
         else:
-            tot += 1
-
+            tot = 1
+            
+        print numMat
         G.NumMaterialized += numMat
         G.ReadIOs += tot
         G.NumReads += 1
         
-        print G.ReadIOs
-        print G.NumReads
-        print G.NumMaterialized
+        #print G.ReadIOs
+        #print G.NumReads
+        #print G.NumMaterialized
         
     Read = staticmethod (Read)
     
     def GenerateRead():
-        hot = range(0, G.NumHot)
-        temp = random.choice(hot)
+        temp = random.choice(G.HotList)
         return  temp
         
     GenerateRead = staticmethod (GenerateRead)
@@ -163,7 +162,7 @@ class GenTx(SimPy.Simulation.Process):
 
         GenTx.TP += 1        
         retTx = []
-        
+
         # Generate the read set. This is done in the same 
         # manner as the Calvin paper.
         for i in range(0, G.NumRecords):
@@ -173,17 +172,17 @@ class GenTx(SimPy.Simulation.Process):
             # HP is incremented modulo the number of hot records
             # to generate the hot record of the subsequent tx.
             if i == 0:
-                retTx.append(GenTx.HP)
-                GenTx.HP = (GenTx.HP+1) % G.NumHot
+                retTx.append(random.choice(G.HotList))
 
             # All the other records are cold records. 
             # The first cold record is one greater than the
             # last hot record. 
             else:
-                retTx.append(GenTx.CP)
-                GenTx.CP = ((GenTx.CP+1) % G.NumCold)
-                if GenTx.CP < G.NumHot:
-                    GenTx.CP += G.NumHot
+                coldItem = random.choice(G.ColdList)
+                while coldItem in retTx:
+                    coldItem = random.choice(G.ColdList)
+
+                retTx.append(coldItem)
 
         ret['Tx'] = retTx
         G.TxMap[ret['TxNo']] = retTx
@@ -233,11 +232,10 @@ class GenTx(SimPy.Simulation.Process):
 
 def main():
     # Initialize the static members of the transaction generation class.
-    G.NumHot = 1000
-    G.NumCold = 1000000
+    numHot = 100
+    G.HotList = range(0, numHot)
+    G.ColdList = range(numHot, 10000000)
     G.NumRecords = 10
-
-    GenTx.CP = G.NumHot
 
     # Initialize the static members of the materialization class.
     # Materialize.Process = Materialize.FIFORoot
@@ -254,8 +252,8 @@ def main():
     MaxSimTime = 1000.0
     SimPy.Simulation.simulate(until = MaxSimTime)
     print 'done!!!'
-    print G.ReadIOs / G.NumReads
-    print G.ReadIOs / G.NumMaterialized
+    print float(G.ReadIOs) / float(G.NumReads)
+    print float(G.ReadIOs) / float(G.NumMaterialized)
 
                 
         
