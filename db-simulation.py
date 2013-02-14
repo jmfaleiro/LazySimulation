@@ -312,9 +312,27 @@ class GenTPCC:
         history_key = "w" + str(warehouse_id) + "h" + GenTPCC.TxId
         writeSet.append(history_key)
         
-        # 
+        # Gene
+        customer_id = random.randint(0, GenTPCC.CUSTOMERS_PER_DISTRICT-1)
+        customer_key = 'w' + str(warehouse_id) + 'd' + str(district_id) + 'c' + str(customer_id)
         
+        r = random.random()*2 - 1
+        if r < 0.0:
+            args['last_name'] = customer_key
+            readSet.append(customer_key)
+        else:
+            readWriteSet.append(customer_key)
+
+        tx = {'readset'            : readSet, 
+              'writeSet'           : writeSet,
+              'readWriteSet'       : readWriteSet,
+              'args'               : args
+             }
         
+        return tx            
+
+    GenPayment = staticmethod(GenPayment)
+
         
 
 
