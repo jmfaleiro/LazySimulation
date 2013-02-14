@@ -134,6 +134,190 @@ class GenRead(SimPy.Simulation.Process):
             yield SimPy.Simulation.hold, self, G.Rnd.expovariate(GenRead.ReadRate)
 
 
+
+class GenTPCC:
+    
+    def GenCommon():
+        warehouse_id = random.randint(0, GenTPCC.NumWarehouses-1)
+        warehouse_key = "w" + str(warehouse_id)
+        
+        district_id = random.randint(0, GenTPCC.DistrictsPerWH-1)
+        district_key = warehouse_key + "d" + str(district_id)
+
+        ret = {'warehouse' : warehouse_key,
+               'district'  : district_key }
+        return ret
+
+    GenCommon = staticmethod(GenCommon)
+    
+    def GenNewOrder():
+        readSet = []
+        writeSet = []
+        readWriteSet = []
+        quantities = []
+        
+        commonStuff = GenTPCC.GenCommon()
+
+        # Add the generated warehouse key to the read set.
+        warehouse_key = commonStuff['warehouse']
+        readSet.append(warehouse_key)
+        
+        # Add the generated district key to the read write set.
+        district_key = commonStuff['district']
+        readWriteSet.append(district_key)
+        
+        # Generate the customer id and add the key to the read set.
+        customer_id = random.randint(0, GenTPCC.CustomersPerDistrict-1)
+        customer_key = district_key + "c" + str(customer_id)
+        readSet.append(customer_key)
+        
+        # Generate a random number of items for the order.
+        order_line_count = random.randint(0, 10) + 5
+        items_used = []
+        
+        # Generate stuff for every item in the order.
+        for i in range(0, order_line_count):
+            
+            # First generate a unique item number.
+            item = random.randint(0, GenTPCC.NUMBER_OF_ITEMS-1)
+            while 1:
+                if not items_used.contains(item):
+                    break
+                else:
+                    item = random.randint(0, GenTPCC.NUMBER_OF_ITEMS-1)
+
+            item_key = "i" + str(item)
+            
+            # Generate a remote warehouse key. 
+            #
+            # I'm not doing anything special for multipartition 
+            # transactions. Ask Alex or Dan about this.
+            remote_warehouse_key = warehouse_key
+
+            # We don't really need this when the remote warehouse
+            # is the same as the current warehouse, but just in case
+            # we change that in the future, make sure your sets are 
+            # ok.
+            if not read_set.contains(remote_warehouse_key):
+                read_set.append(remote_warehouse_key)            
+                
+            # Generate stock key and add to the read write set.
+            stock_key = remote_warehouse_key + "s" + item_key
+            readWriteSet.append(stock_key)
+            
+            # Append a random number to the quantities. 
+            # Quantities is a parameter of the transaction.
+            quantities.append(random.randint(1, 10))
+        
+            # Generate the order line key and add it to the write set.
+            order_line_key = warehouse_key + "o" + str(GenTPCC.TxId) + "ol" + str(i)
+            writeSet.append(order_line_key)
+
+        # Generate a key for new order, add to the write set.
+        new_order_key = district_key + "no" + str(GenTPCC.TxId)
+        writeSet.append(new_order_key)
+        
+        # Generate a key for orders and add to the write set.
+        order_key = customer_key + "o" + str(GenTPCC.TxId)
+        writeSet.append(order_key)
+        
+        GenTPCC.TxId += 1
+        
+        tx = {'readset'            : readSet, 
+              'writeSet'           : writeSet,
+              'readWriteSet'       : readWriteSet,
+              'args'               : { 'order_line_count' : order_line_count
+                                       'quantities'       : quantities
+                                     }
+             }
+        
+        return tx
+    
+    GenNewOrder = staticmethod(GenNewOrder)
+    
+    def GenOrderStatus():
+        
+        readSet = []
+        writeSet = []
+        readWriteSet = []
+        
+        args = {}
+        
+        commonStuff = GenTPCC.GenCommon()
+        
+        warehouse_id = commonStuff['warehouse']['id']
+        warehouse_key = commonStuff['warehouse']['key']
+
+        district_id = commonStuff['district']['id']
+        district_key = commonStuff['district']['key']
+
+        customer_id = random.randint(0, GenTPCC.CUSTOMERS_PER_DISTRICT-1)
+        customer_key = 'w' + str(warehouse_id) + 'd' + str(district_id) + 'c' + str(customer_id)
+
+        r = random.random()*2 - 1
+        
+        if (r < 0.0):
+            argc = {'last_name' : customer_key}
+        else:
+            readWriteSet.append(customer_key)
+            
+        tx = {'readset'            : readSet, 
+              'writeSet'           : writeSet,
+              'readWriteSet'       : readWriteSet,
+              'args'               : args
+             }
+        
+        return tx            
+    
+    GenOrderStatus = staticmethod(GenOrderStatus)
+
+    def GenStockLevel():
+        args = {'threshold' : random.randint(10, 20)}
+        
+        commonStuff = GenTPCC.GenCommon()
+        district_key = commonStuff['district']['key']
+        readSet = [district_key]
+
+        tx = {'readset'            : readSet, 
+              'writeSet'           : [],
+              'readWriteSet'       : [],
+              'args'               : args
+             }
+
+        return tx
+
+    GenStockLevel = staticmethod(GenStockLevel)
+
+    def GenPayment():
+        
+        readSet = []
+        writeSet = []
+        readWriteSet = []
+
+        args = {}
+        
+        commonStuff = GenTPCC.GenCommon()
+        
+        # Add the generated warehouse key to the read write set.
+        warehouse_id = commonStuff['warehouse']['id']
+        warehouse_key = commonStuff['warehouse']['key']
+        readWriteSet.append(warehouse_key + "y")
+        
+        # Add the generated district key to the read write set.
+        district_id = commonStuff['district']['id']
+        district_key = commonStuff['district']['key']
+        readWriteSet.append(district_key + "y")
+        
+        # Generate the history key and add it to the write set.
+        history_key = "w" + str(warehouse_id) + "h" + GenTPCC.TxId
+        writeSet.append(history_key)
+        
+        # 
+        
+        
+        
+
+
 # This class is used to generate transactions in the
 # same manner as described in the microbenchmark in the
 # Calvin paper. 
