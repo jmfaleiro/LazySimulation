@@ -2,6 +2,7 @@ import SimPy.Simulation
 import random
 import networkx as nx
 import types
+import sys
 
 # TODO: 1. Vary the kinds of transactions
 #       
@@ -30,7 +31,7 @@ class G:
     
 
 class GenRead(SimPy.Simulation.Process):
-    ReadRate = 1/0.01
+
     
     def __init__(self):
         SimPy.Simulation.Process.__init__(self)
@@ -76,7 +77,7 @@ class GenRead(SimPy.Simulation.Process):
 
                 
                 if not(tx in G.Roots):
-                    print done
+                    #print done
                     for t in done:
                         print G.DependencyGraph.predecessors(t)
                         print G.DependencyGraph.successors(t)
@@ -109,7 +110,7 @@ class GenRead(SimPy.Simulation.Process):
         else:
             tot = 1
             
-        print numMat
+        #print numMat
         G.NumMaterialized += numMat
         G.ReadIOs += tot
         G.NumReads += 1
@@ -171,8 +172,11 @@ class GenTx(SimPy.Simulation.Process):
             # We have a pointer to hot record Identifiers (HP).
             # HP is incremented modulo the number of hot records
             # to generate the hot record of the subsequent tx.
-            if i == 0:
-                retTx.append(random.choice(G.HotList))
+            if i < 8:
+                hotItem = random.choice(G.HotList)
+                while hotItem in retTx:
+                    hotItem = random.choice(G.HotList)
+                retTx.append(hotItem)
 
             # All the other records are cold records. 
             # The first cold record is one greater than the
@@ -205,9 +209,7 @@ class GenTx(SimPy.Simulation.Process):
             if record in G.LastWrite:
                 isRoot = False
                 
-                if G.LastWrite[record] == index:
-                    print index
-
+                
                 assert (G.LastWrite[record] != index)
                 G.DependencyGraph.add_edge(G.LastWrite[record], index)
             
@@ -226,36 +228,45 @@ class GenTx(SimPy.Simulation.Process):
         while 1:
             curTx = GenTx.GenTransaction()
             GenTx.InsertTx(curTx)
-#            SimPy.Simulation.reactivate(self.DB)
             yield SimPy.Simulation.hold, self, G.Rnd.expovariate(GenTx.TxRate)
-            
+
+
+    
 
 def main():
     # Initialize the static members of the transaction generation class.
     numHot = 100
     G.HotList = range(0, numHot)
     G.ColdList = range(numHot, 10000000)
-    G.NumRecords = 10
+    G.NumRecords = 10    
 
     # Initialize the static members of the materialization class.
-    # Materialize.Process = Materialize.FIFORoot
+    # Materialize.Process = Materialize.FIFORoot    
     
-    SimPy.Simulation.initialize()    
+    GenRead.ReadRate = 1 / float(sys.argv[1])
+    SimPy.Simulation.initialize()
     
     rtx = GenRead()
     tx = GenTx()
-    
-#    SimPy.Simulation.activate(db, db.Run())
 
     SimPy.Simulation.activate(tx, tx.Run())
     SimPy.Simulation.activate(rtx, rtx.Run())
     MaxSimTime = 1000.0
     SimPy.Simulation.simulate(until = MaxSimTime)
-    print 'done!!!'
-    print float(G.ReadIOs) / float(G.NumReads)
-    print float(G.ReadIOs) / float(G.NumMaterialized)
+    
+    rResults = open('reads.txt', 'a')
+    readResult = float(G.ReadIOs) / float(G.NumReads)
+    
+    rResults.write(str(GenTx.TxRate / GenRead.ReadRate) + ":" + str(readResult)+'\n')
+    rResults.close()
 
-                
+    mResults = open('materialized.txt', 'a')
+    matResult = float(G.ReadIOs) / float(G.NumMaterialized)
+    
+    mResults.write(str(GenTx.TxRate / GenRead.ReadRate) + ":" + str(matResult)+'\n')
+    mResults.close()
+    
+    print 'done!!!'
         
 if __name__ == '__main__':
     main()
