@@ -59,8 +59,9 @@ class GenRead(SimPy.Simulation.Process):
         tot = 0
         numMat = 0
         if n in G.LastWrite:
-
-            txList = GenRead.BackwardsBFS(G.LastWrite[n])
+            
+            
+            txList = GenRead.BackwardsBFS(G.LastWrite[n]['Tx'])
             txList.sort()
             #print txList
             done = {}
@@ -71,7 +72,7 @@ class GenRead(SimPy.Simulation.Process):
                     continue
                 
                 #print 1
-                records = G.TxMap[txList[0]]
+                records = G.TxMap[txList[0]]['Tx']
                 inMem += records
                 tx = txList[0]
 
@@ -100,8 +101,10 @@ class GenRead(SimPy.Simulation.Process):
                 
                 # Update all last write information: In case this was
                 # the last write of a record, update the info.
+
                 for record in records:
-                    if G.LastWrite[record] == tx:
+
+                    if G.LastWrite[record]['Tx'] == tx:
                         del G.LastWrite[record]
                     
             numMat = len(set(done.keys()))
@@ -177,6 +180,9 @@ class GenTx(SimPy.Simulation.Process):
                 hotItem = random.choice(G.HotList)
                 while hotItem in retTx:
                     hotItem = random.choice(G.HotList)
+                # Keep some meta-data along with the record number.
+                # We're going to use this later on to find the number
+                # of I/Os required to materialize this Tx.
                 retTx.append(hotItem)
 
             # All the other records are cold records. 
@@ -186,11 +192,14 @@ class GenTx(SimPy.Simulation.Process):
                 coldItem = random.choice(G.ColdList)
                 while coldItem in retTx:
                     coldItem = random.choice(G.ColdList)
-
+                    
+                # Meta data update again. This is the same
+                # as that for hot records. We're going to 
+                # update this while finding dependencies.
                 retTx.append(coldItem)
 
         ret['Tx'] = retTx
-        G.TxMap[ret['TxNo']] = retTx
+        G.TxMap[ret['TxNo']] = ret
         return ret
 
     GenTransaction = staticmethod(GenTransaction)
@@ -198,7 +207,10 @@ class GenTx(SimPy.Simulation.Process):
     def InsertTx(t):
         isRoot = True 
         index = t['TxNo']
+        
         G.DependencyGraph.add_node(index)
+
+        recordSet = t['Tx']
         
         for record in t['Tx']:
             
@@ -208,16 +220,21 @@ class GenTx(SimPy.Simulation.Process):
             # and the last writer.
 
             if record in G.LastWrite:
-                isRoot = False
+                isRoot = False                
+                assert (G.LastWrite[record]['Tx'] != index)
                 
-                
-                assert (G.LastWrite[record] != index)
-                G.DependencyGraph.add_edge(G.LastWrite[record], index)
+                G.DependencyGraph.add_edge(G.LastWrite[record]['Tx'], index)
+                parentTx = G.TxMap[G.LastWrite[record]['Tx']]
+                #print parentTx
+                recordSet = recordSet | parentTx['recordSet']            
             
-            # This transaction is now the last writer to this
-            # record.
-            G.LastWrite[record] = index
-            
+        t['recordSet'] = recordSet
+        
+        for record in t['Tx']:
+            G.LastWrite[record] = {}
+            G.LastWrite[record]['Tx'] = index
+            G.LastWrite[record]['IO'] = len(recordSet)
+
         if isRoot:
             assert isinstance(t['TxNo'], int)
             assert not(t['TxNo'] in G.Roots)
@@ -252,7 +269,7 @@ def main():
 
     SimPy.Simulation.activate(tx, tx.Run())
     SimPy.Simulation.activate(rtx, rtx.Run())
-    MaxSimTime = 1000.0
+    MaxSimTime = 10.0
     SimPy.Simulation.simulate(until = MaxSimTime)
     
     rResults = open('reads.txt', 'a')
