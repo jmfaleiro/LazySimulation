@@ -27,9 +27,35 @@ class G:
 
     ReadIOs = 0                             # Total IOs used for materializing reads
     NumReads = 0                            # # Materializing reads
+    FreeIOs = 0
 
     Record = -1
     
+
+class BgRead(SimPy.Simulation.Process):
+    def __init__(self):
+        SimPy.Simulation.Process.__init__(self)
+        
+    def FindRead():
+        maxRecord = -1
+        maxIO = -1
+        for record in G.LastWrite:
+            if G.LastWrite[record]['IO'] > maxIO:
+                maxRecord = record
+                maxIO = G.LastWrite[record]['IO']
+        
+        assert maxIO != -1 and maxRecord != -1
+        return maxRecord
+
+    FindRead = staticmethod(FindRead)
+    
+    def Run(self):
+        while 1:
+            if G.LastWrite:
+                GenRead.Read(BgRead.FindRead(), True)
+                print 'blah'
+            yield SimPy.Simulation.hold, self, G.Rnd.expovariate(BgRead.BgMatRate)
+        
 
 class GenRead(SimPy.Simulation.Process):
 
@@ -127,6 +153,7 @@ class GenRead(SimPy.Simulation.Process):
                         del G.LastWrite[record]
                     else:
                         G.LastWrite[record]['IO'] -= 1;
+                        #GenTx.UpdateMeta(record)
                     
                 inMem += G.TxMap[tx]
                 
@@ -135,15 +162,16 @@ class GenRead(SimPy.Simulation.Process):
                 tot = 2 * len(set(inMem))
             else:
                 tot = 0
+                G.FreeIOs += 2 * len(set(inMem))
 
                     
             numMat = len(done)
-            print 'end'
+
                 
         else:
             tot = 1
             
-        print G.DependencyGraph.nodes()
+        
         #print numMat
         G.NumMaterialized += numMat
         G.ReadIOs += tot
@@ -160,13 +188,6 @@ class GenRead(SimPy.Simulation.Process):
         return  temp
         
     GenerateRead = staticmethod (GenerateRead)
-
-    def RunBackground(self):
-        while 1:
-            if G.MetaData:
-                record = G.MetaData[0]
-                GenRead.Read(record, True)
-            yield SimPy.Simulation.hold, self, G.Rnd.expovariate(GenRead.BgMatRate)
 
     def Run(self):
         while 1:
@@ -249,7 +270,6 @@ class GenTx(SimPy.Simulation.Process):
         G.DependencyGraph.add_node(index)
 
         recordSet = list(t['Tx'])
-        print len(t['Tx'])
 
         cnt = 0
         for record in t['Tx']:
@@ -272,7 +292,7 @@ class GenTx(SimPy.Simulation.Process):
                 G.LastWrite[record]['Tx'] = index
                 G.LastWrite[record]['IO'] = 1
             
-            GenTx.UpdateMeta(record)
+            #GenTx.UpdateMeta(record)
 
         if isRoot:
             G.Roots.add(t['TxNo'])        
@@ -287,17 +307,30 @@ class GenTx(SimPy.Simulation.Process):
             G.MetaData.remove(record)
         except:
             pass
-        
-        # Find the new count of the record.
-        count = G.LastWrite[record]['IO']
-        length = len(G.MetaData)
 
-        # Search for the right position and insert it.
-        for i in range(0, length):
-            curCount = G.LastWrite[G.Metadata[i]]['IO']
-            if curCount < count:
-                G.MetaData.insert(i, record)
-                break
+
+        if record in G.LastWrite:
+        
+            # Find the new count of the record.
+            count = G.LastWrite[record]['IO']
+            
+            # If the list is empty then we don't have to do anything
+            if not G.MetaData:
+                G.MetaData.append(record)
+            
+            else:
+                length = len(G.MetaData)
+                i = 0
+
+                # Search for the right position and insert it.            
+                for r in G.MetaData:
+                    curCount = G.LastWrite[r]['IO']
+                    if curCount < count:
+                        break
+                    i += 1
+                    G.MetaData.insert(i, record)
+
+        print G.MetaData
             
     UpdateMeta = staticmethod(UpdateMeta)
     
@@ -322,16 +355,16 @@ def main():
     # Materialize.Process = Materialize.FIFORoot    
     
     GenRead.ReadRate = 1 / float(sys.argv[1])
-    GenRead.BgMatRate = 1 / float(sys.argv[2])
+    BgRead.BgMatRate = 1 / float(sys.argv[2])
     SimPy.Simulation.initialize()
     
     rtx = GenRead()
     tx = GenTx()
-    bg = GenRead()
+    bg = BgRead()
 
     SimPy.Simulation.activate(tx, tx.Run())
     SimPy.Simulation.activate(rtx, rtx.Run())
-    SimPy.Simulation.activate(bg, bg.RunBackground())
+    SimPy.Simulation.activate(bg, bg.Run())
     MaxSimTime = 100.0
     SimPy.Simulation.simulate(until = MaxSimTime)
     
@@ -343,6 +376,10 @@ def main():
 
     mResults = open('materialized.txt', 'a')
     matResult = float(G.ReadIOs) / float(G.NumMaterialized)
+
+    fResults = open('free.txt', 'a')
+    freeResults = float(G.FreeIOs) / float(G.NumReads)
+    fResults.write(str(freeResults) + '\n')
     
     mResults.write(str(GenTx.TxRate / GenRead.ReadRate) + ":" + str(matResult)+'\n')
     mResults.close()
