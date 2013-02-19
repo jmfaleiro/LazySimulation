@@ -53,7 +53,6 @@ class BgRead(SimPy.Simulation.Process):
         while 1:
             if G.LastWrite:
                 GenRead.Read(BgRead.FindRead(), True)
-                print 'blah'
             yield SimPy.Simulation.hold, self, G.Rnd.expovariate(BgRead.BgMatRate)
         
 
@@ -297,6 +296,7 @@ class GenTx(SimPy.Simulation.Process):
         if isRoot:
             G.Roots.add(t['TxNo'])        
         
+        GenTx.TxCost(t['TxNo'])
 
                 
     InsertTx = staticmethod(InsertTx)
@@ -308,7 +308,9 @@ class GenTx(SimPy.Simulation.Process):
             allRecords += G.TxMap[tx]['Tx']
         
         G.TxMap[t]['Cost'] = len(set(allRecords))
-
+        print G.TxMap[t]['Cost']
+    
+    TxCost = staticmethod(TxCost)
 
     def UpdateMeta(record):
         # Try to remove the record from the sorted list, if we fail, it's ok.
