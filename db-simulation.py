@@ -146,7 +146,7 @@ class GenRead(SimPy.Simulation.Process):
                     if not G.DependencyGraph.predecessors(child):
                         G.Roots.add(child)
                 
-                records = G.TxMap[tx]
+                records = G.TxMap[tx]['Tx']
                 
                 for record in records:
                     if G.LastWrite[record]['Tx'] == tx:
@@ -155,7 +155,7 @@ class GenRead(SimPy.Simulation.Process):
                         G.LastWrite[record]['IO'] -= 1;
                         #GenTx.UpdateMeta(record)
                     
-                inMem += G.TxMap[tx]
+                inMem += records
                 
                 
             if not isFree:
@@ -258,7 +258,7 @@ class GenTx(SimPy.Simulation.Process):
                 retTx.append(coldItem)
 
         ret['Tx'] = retTx
-        G.TxMap[ret['TxNo']] = retTx
+        G.TxMap[ret['TxNo']] = ret
         return ret
 
     GenTransaction = staticmethod(GenTransaction)
@@ -300,6 +300,15 @@ class GenTx(SimPy.Simulation.Process):
 
                 
     InsertTx = staticmethod(InsertTx)
+
+    def TxCost(t):
+        GenRead.BackwardsBFS(t)
+        allRecords = []
+        for tx in GenRead.BackwardsBFS(t):
+            allRecords += G.TxMap[tx]['Tx']
+        
+        G.TxMap[t]['Cost'] = len(set(allRecords))
+
 
     def UpdateMeta(record):
         # Try to remove the record from the sorted list, if we fail, it's ok.
