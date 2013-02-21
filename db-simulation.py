@@ -30,7 +30,27 @@ class G:
     FreeIOs = 0
 
     Record = -1
-    
+    SortedTxList = []
+
+    def insert_sorted_tx_list(tx):
+        num_ios = G.TxMap[tx]['Cost']
+        index = 0
+
+        for cur_tx in G.SortedTxList:
+            cur_cost = G.TxMap[cur_tx]['Cost']
+            if num_ios > cur_cost:
+                break
+            else:
+                index += 1
+        
+        G.SortedTxList.insert(index, tx)
+        
+    insert_sorted_tx_list = staticmethod(insert_sorted_tx_list)
+
+    def write_dag_size(time, size):
+        G.dag_size_file.write(str(time) + ':' + str(size) + '\n')
+
+    write_dag_size = staticmethod(write_dag_size)
 
 class BgRead(SimPy.Simulation.Process):
     def __init__(self):
@@ -39,6 +59,7 @@ class BgRead(SimPy.Simulation.Process):
     def FindRead():
         maxRecord = -1
         maxIO = -1
+            
         for record in G.LastWrite:
             if G.LastWrite[record]['IO'] > maxIO:
                 maxRecord = record
@@ -154,6 +175,9 @@ class GenRead(SimPy.Simulation.Process):
                         G.LastWrite[record]['IO'] -= 1;
                         #GenTx.UpdateMeta(record)
                     
+                del G.TxMap[tx]
+
+                G.SortedTxList.remove(tx)
                 inMem += records
                 
                 
@@ -297,7 +321,7 @@ class GenTx(SimPy.Simulation.Process):
             G.Roots.add(t['TxNo'])        
         
         GenTx.TxCost(t['TxNo'])
-
+        G.insert_sorted_tx_list(t['TxNo'])
                 
     InsertTx = staticmethod(InsertTx)
 
@@ -361,6 +385,7 @@ def main():
     G.HotList = range(0, numHot)
     G.ColdList = range(numHot, 10000000)
     G.NumRecords = 10    
+    G.dag_size_file = open('dag_size.txt', 'a')
 
     # Initialize the static members of the materialization class.
     # Materialize.Process = Materialize.FIFORoot    
@@ -378,6 +403,8 @@ def main():
     SimPy.Simulation.activate(bg, bg.Run())
     MaxSimTime = 100.0
     SimPy.Simulation.simulate(until = MaxSimTime)
+
+    G.dag_size_file.close()
     
     rResults = open('reads.txt', 'a')
     readResult = float(G.ReadIOs) / float(G.NumReads)
